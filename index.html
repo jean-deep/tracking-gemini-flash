@@ -4,10 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Body Tracker Pro - Intelligent Tracking</title>
+    <title>Body Tracker Pro - Herramientas y 3D</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -55,6 +56,24 @@
             border-radius: 10px;
         }
 
+        /* Ventana 3D Flotante */
+        #floating-3d-panel {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 350px;
+            height: 450px;
+            cursor: move;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .status-lost {
+            animation: pulse-red 1.5s infinite;
+        }
+
         @keyframes pulse-red {
             0% {
                 box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
@@ -69,8 +88,11 @@
             }
         }
 
-        .status-lost {
-            animation: pulse-red 1.5s infinite;
+        .barrier-status {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -97,7 +119,8 @@
     <!-- Sidebar Principal -->
     <div id="sidebar"
         class="fixed top-0 left-0 h-full w-80 glass z-40 transform -translate-x-full panel-transition p-6 pt-24 overflow-y-auto custom-scrollbar">
-        <h2 class="text-2xl font-bold mb-8 text-blue-400">Panel de Control</h2>
+        <h2 class="text-2xl font-bold mb-8 text-blue-400 italic">Body Tracker <span
+                class="text-white font-light text-sm">v2.0</span></h2>
 
         <!-- Configuración del Controlador -->
         <div class="mb-6">
@@ -108,53 +131,88 @@
             </button>
             <div id="config-content" class="space-y-4 text-sm">
                 <div class="p-3 bg-white/5 rounded-lg border border-white/10">
-                    <p class="mb-2 text-xs text-gray-400">Confianza Mínima de Rastreo</p>
+                    <p class="mb-2 text-xs text-gray-400">Confianza Mínima</p>
                     <input type="range" id="min-confidence" class="w-full accent-blue-500" min="0" max="1" step="0.1"
                         value="0.5">
-                </div>
-                <div class="p-3 bg-white/5 rounded-lg border border-white/10">
-                    <p class="mb-2 text-xs text-gray-400">Modo de Interpolación</p>
-                    <select id="tracking-mode" class="w-full bg-black/50 p-2 rounded border border-white/10">
-                        <option value="predictive">Predicción Inteligente (Kalman)</option>
-                        <option value="raw">Datos Crudos (Baja Latencia)</option>
-                    </select>
                 </div>
             </div>
         </div>
 
-        <!-- Rastreo de Esqueleto -->
+        <!-- Visualizador 3D & Representación -->
         <div class="mb-6">
             <button onclick="togglePanel('skeleton-content')"
                 class="flex items-center justify-between w-full mb-2 font-semibold text-gray-300">
                 VISUALIZADOR 3D
                 <span>▼</span>
             </button>
-            <div id="skeleton-content" class="space-y-2">
+            <div id="skeleton-content" class="space-y-3">
+                <div class="flex items-center justify-between p-3 bg-blue-500/10 rounded-lg border border-blue-500/30">
+                    <span class="text-sm font-medium">Recreación 3D Persona</span>
+                    <button id="toggle-3d-btn"
+                        class="px-3 py-1 bg-blue-600 rounded text-xs hover:bg-blue-500">INICIAR</button>
+                </div>
                 <div class="flex items-center gap-2 text-sm text-gray-400">
                     <input type="checkbox" id="show-skeleton" checked>
-                    <label>Mostrar Esqueleto</label>
-                </div>
-                <div class="flex items-center gap-2 text-sm text-gray-400">
-                    <input type="checkbox" id="show-connectors" checked>
-                    <label>Dibujar Conectores</label>
-                </div>
-                <div class="flex items-center gap-2 text-sm text-gray-400">
-                    <input type="checkbox" id="show-points" checked>
-                    <label>Nodos de Articulación</label>
+                    <label>Overlay en Cámara</label>
                 </div>
             </div>
         </div>
 
-        <!-- Consola de Estado -->
+        <!-- Nueva Sección: Herramientas -->
+        <div class="mb-6">
+            <button onclick="togglePanel('tools-content')"
+                class="flex items-center justify-between w-full mb-2 font-semibold text-yellow-400">
+                HERRAMIENTAS
+                <span>▼</span>
+            </button>
+            <div id="tools-content" class="space-y-4">
+                <div class="p-3 bg-white/5 rounded-lg border border-white/10">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm">Barrera Parking</span>
+                        <span id="barrier-state-badge" class="barrier-status bg-gray-600">CERRADA</span>
+                    </div>
+                    <div class="text-[10px] text-gray-500 mb-3">Gesto: Sube brazos para abrir, baja para cerrar.</div>
+                    <div class="flex items-center gap-2 text-xs">
+                        <input type="checkbox" id="tool-barrier-active">
+                        <label>Activar Control de Gestos</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Consola -->
         <div class="mb-6">
             <button onclick="togglePanel('console-content')"
                 class="flex items-center justify-between w-full mb-2 font-semibold text-gray-300">
-                CONSOLA DE ESTADO
+                CONSOLA
                 <span>▼</span>
             </button>
             <div id="console-content"
-                class="h-48 bg-black/40 rounded-lg p-3 text-[10px] font-mono overflow-y-auto custom-scrollbar border border-white/10 text-green-400">
-                <div id="log-output">> Sistema Iniciado...<br>> Esperando cámara...</div>
+                class="h-40 bg-black/40 rounded-lg p-3 text-[10px] font-mono overflow-y-auto custom-scrollbar border border-white/10 text-green-400">
+                <div id="log-output">> Sistema Listo...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel 3D Flotante (Three.js) -->
+    <div id="floating-3d-panel" class="glass rounded-2xl border border-white/20">
+        <div id="drag-handle"
+            class="w-full p-2 bg-white/10 border-b border-white/10 flex justify-between items-center px-4 cursor-grab">
+            <span class="text-[10px] font-bold tracking-widest text-blue-400">ESCENA DIGITAL 3D</span>
+            <div class="flex gap-2">
+                <div class="w-2 h-2 rounded-full bg-green-500"></div>
+            </div>
+        </div>
+        <div id="three-container" class="flex-grow w-full relative">
+            <div class="absolute bottom-2 left-2 flex flex-col gap-1 z-10">
+                <div class="flex items-center gap-2 text-[9px] bg-black/60 p-1 px-2 rounded border border-white/10">
+                    <input type="checkbox" id="3d-show-avatar" checked>
+                    <label>AVATAR</label>
+                </div>
+                <div class="flex items-center gap-2 text-[9px] bg-black/60 p-1 px-2 rounded border border-white/10">
+                    <input type="checkbox" id="3d-show-barrier" checked>
+                    <label>BARRERA</label>
+                </div>
             </div>
         </div>
     </div>
@@ -172,29 +230,207 @@
     </div>
 
     <script>
-        // --- LÓGICA DE INTERFAZ ---
+        // --- LÓGICA DE INTERFAZ & DRAG ---
         const menuToggle = document.getElementById('menu-toggle');
         const sidebar = document.getElementById('sidebar');
+        const panel3d = document.getElementById('floating-3d-panel');
+        const toggle3dBtn = document.getElementById('toggle-3d-btn');
+        const dragHandle = document.getElementById('drag-handle');
+
         let isMenuOpen = false;
+        let is3dActive = false;
 
         menuToggle.addEventListener('click', () => {
             isMenuOpen = !isMenuOpen;
             sidebar.style.transform = isMenuOpen ? 'translateX(0)' : 'translateX(-100%)';
         });
 
-        function togglePanel(id) {
-            const panel = document.getElementById(id);
-            panel.classList.toggle('hidden');
-        }
+        toggle3dBtn.addEventListener('click', () => {
+            is3dActive = !is3dActive;
+            panel3d.style.display = is3dActive ? 'flex' : 'none';
+            toggle3dBtn.innerText = is3dActive ? 'DETENER' : 'INICIAR';
+            if (is3dActive) initThreeScene();
+        });
 
+        // Drag simple para el panel
+        let isDragging = false;
+        let offset = [0, 0];
+        dragHandle.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            offset = [panel3d.offsetLeft - e.clientX, panel3d.offsetTop - e.clientY];
+            dragHandle.style.cursor = 'grabbing';
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            panel3d.style.left = (e.clientX + offset[0]) + 'px';
+            panel3d.style.top = (e.clientY + offset[1]) + 'px';
+            panel3d.style.bottom = 'auto';
+            panel3d.style.right = 'auto';
+        });
+        document.addEventListener('mouseup', () => { isDragging = false; dragHandle.style.cursor = 'grab'; });
+
+        function togglePanel(id) { document.getElementById(id).classList.toggle('hidden'); }
         function log(msg, type = 'info') {
             const consoleOut = document.getElementById('log-output');
             const color = type === 'warn' ? 'text-yellow-400' : (type === 'error' ? 'text-red-400' : 'text-green-400');
-            consoleOut.innerHTML += `<div class="${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            consoleOut.innerHTML += `<div class="${color}">> ${msg}</div>`;
             consoleOut.scrollTop = consoleOut.scrollHeight;
         }
 
-        // --- LÓGICA DE RASTREO INTELIGENTE ---
+        // --- LÓGICA DE HERRAMIENTAS: BARRERA ---
+        const BarrierState = { CLOSED: 'CERRADA', OPENING: 'ABRIENDO', OPEN: 'ABIERTA', CLOSING: 'CERRANDO' };
+        let currentBarrierState = BarrierState.CLOSED;
+        let barrierAngle = 0; // 0 a 90 grados
+
+        function updateBarrierLogic() {
+            if (!document.getElementById('tool-barrier-active').checked) return;
+
+            // Visual en UI
+            const badge = document.getElementById('barrier-state-badge');
+            badge.innerText = currentBarrierState;
+            badge.className = `barrier-status ${currentBarrierState === BarrierState.CLOSED ? 'bg-red-500' : currentBarrierState === BarrierState.OPEN ? 'bg-green-500' : 'bg-yellow-600 animate-pulse'}`;
+
+            // Simulación de movimiento
+            if (currentBarrierState === BarrierState.OPENING) {
+                barrierAngle += 2;
+                if (barrierAngle >= 90) {
+                    barrierAngle = 90;
+                    currentBarrierState = BarrierState.OPEN;
+                    log("Barrera: Apertura Completa");
+                }
+            } else if (currentBarrierState === BarrierState.CLOSING) {
+                barrierAngle -= 2;
+                if (barrierAngle <= 0) {
+                    barrierAngle = 0;
+                    currentBarrierState = BarrierState.CLOSED;
+                    log("Barrera: Cierre Completo");
+                }
+            }
+        }
+
+        function checkGestures(landmarks) {
+            if (!document.getElementById('tool-barrier-active').checked) return;
+
+            // No aceptar comandos si está en movimiento
+            if (currentBarrierState === BarrierState.OPENING || currentBarrierState === BarrierState.CLOSING) return;
+
+            // Simplificación de gestos:
+            // Brazo arriba: Muñeca por encima de la nariz
+            const nose = landmarks[0];
+            const leftWrist = landmarks[15];
+            const rightWrist = landmarks[16];
+
+            if (leftWrist.y < nose.y && rightWrist.y < nose.y && currentBarrierState === BarrierState.CLOSED) {
+                currentBarrierState = BarrierState.OPENING;
+                log("Gesto Detectado: SUBIR -> Abriendo Barrera", "info");
+            } else if (leftWrist.y > 0.8 && rightWrist.y > 0.8 && currentBarrierState === BarrierState.OPEN) {
+                // Brazos abajo (relajados)
+                currentBarrierState = BarrierState.CLOSING;
+                log("Gesto Detectado: BAJAR -> Cerrando Barrera", "info");
+            }
+        }
+
+        // --- MOTOR THREE.JS (ESCENA 3D) ---
+        let scene, camera3d, renderer, avatarGroup, barrierArm;
+        let jointSpheres = [];
+
+        function initThreeScene() {
+            if (scene) return; // Ya inicializada
+
+            const container = document.getElementById('three-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a0f);
+
+            camera3d = new THREE.PerspectiveCamera(75, 350 / 450, 0.1, 1000);
+            camera3d.position.set(0, 1, 3);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(350, 400);
+            container.appendChild(renderer.domElement);
+
+            // Iluminación
+            const light = new THREE.AmbientLight(0x404040);
+            scene.add(light);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 5, 5);
+            scene.add(directionalLight);
+
+            // Piso
+            const grid = new THREE.GridHelper(10, 20, 0x333333, 0x222222);
+            scene.add(grid);
+
+            // Avatar (Esqueleto 3D simplificado)
+            avatarGroup = new THREE.Group();
+            const sphereGeo = new THREE.SphereGeometry(0.05, 16, 16);
+            const sphereMat = new THREE.MeshPhongMaterial({ color: 0x3b82f6 });
+
+            for (let i = 0; i < 33; i++) {
+                const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+                jointSpheres.push(sphere);
+                avatarGroup.add(sphere);
+            }
+            scene.add(avatarGroup);
+
+            // Barrera 3D
+            const barrierGroup = new THREE.Group();
+            barrierGroup.position.set(1.5, 0, 0);
+
+            const baseGeo = new THREE.BoxGeometry(0.3, 1, 0.3);
+            const baseMat = new THREE.MeshPhongMaterial({ color: 0x444444 });
+            const base = new THREE.Mesh(baseGeo, baseMat);
+            base.position.y = 0.5;
+            barrierGroup.add(base);
+
+            const armGeo = new THREE.BoxGeometry(2, 0.1, 0.05);
+            const armMat = new THREE.MeshPhongMaterial({ color: 0xffcc00 });
+            barrierArm = new THREE.Mesh(armGeo, armMat);
+            barrierArm.position.set(-1, 0.9, 0);
+
+            // Pivot para rotación correcta
+            const pivot = new THREE.Group();
+            pivot.position.set(0.1, 0.9, 0);
+            pivot.add(barrierArm);
+            barrierArm.position.x = -1; // Desplazar barra respecto al pivote
+
+            barrierGroup.add(pivot);
+            barrierGroup.name = "parking_barrier";
+            scene.add(barrierGroup);
+
+            animateThree();
+        }
+
+        function animateThree() {
+            if (!is3dActive) return;
+            requestAnimationFrame(animateThree);
+
+            // Actualizar visibilidad de componentes
+            avatarGroup.visible = document.getElementById('3d-show-avatar').checked;
+            const barrier = scene.getObjectByName("parking_barrier");
+            if (barrier) barrier.visible = document.getElementById('3d-show-barrier').checked;
+
+            // Rotar barrera basado en lógica de gestos
+            if (barrierArm && barrierArm.parent) {
+                barrierArm.parent.rotation.z = THREE.MathUtils.degToRad(barrierAngle);
+            }
+
+            renderer.render(scene, camera3d);
+        }
+
+        function update3DAvatar(landmarks) {
+            if (!is3dActive || !landmarks) return;
+
+            landmarks.forEach((lm, i) => {
+                if (jointSpheres[i]) {
+                    // Mapeo de coordenadas MediaPipe (0-1) a Three.js (-1 a 1 aprox)
+                    // Invertimos Y porque en WebGL Y sube
+                    jointSpheres[i].position.x = (lm.x - 0.5) * -2.5;
+                    jointSpheres[i].position.y = (0.5 - lm.y) * 2.5 + 1; // Subir un poco del suelo
+                    jointSpheres[i].position.z = (lm.z) * -2;
+                }
+            });
+        }
+
+        // --- LÓGICA DE RASTREO (INTEGRACIÓN) ---
         const videoElement = document.getElementById('video-hidden');
         const canvasElement = document.getElementById('output-canvas');
         const canvasCtx = canvasElement.getContext('2d');
@@ -202,176 +438,61 @@
         const statusText = document.getElementById('status-text');
         const fpsCounter = document.getElementById('fps-counter');
 
-        // Estructura para Memoria de Puntos (Predicción de movimiento rápido)
-        // Guardamos posición anterior y velocidad para interpolar oclusiones
-        let trackerState = {
-            history: [], // Historial de frames para promedios
-            lastPositions: {}, // Última posición conocida de cada landmark
-            velocities: {}, // Velocidad calculada (píxeles/frame)
-            isLost: true,
-            framesLost: 0,
-            maxFramesToPredict: 15 // Cuántos frames predecir antes de rendirse
-        };
-
         function onResults(results) {
-            // Cálculo de FPS
             updateFPS();
+            updateBarrierLogic(); // Ciclo de animación de barrera
 
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-            // Dibujar el video de fondo con opacidad reducida para mejor visibilidad del esqueleto
             canvasCtx.globalAlpha = 0.4;
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
             canvasCtx.globalAlpha = 1.0;
 
             if (results.poseLandmarks) {
-                processTrackingLogic(results.poseLandmarks);
+                checkGestures(results.poseLandmarks);
+                update3DAvatar(results.poseLandmarks);
 
-                // Visualización
                 if (document.getElementById('show-skeleton').checked) {
-                    if (document.getElementById('show-connectors').checked) {
-                        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
-                            { color: '#3b82f6', lineWidth: 4 });
-                    }
-                    if (document.getElementById('show-points').checked) {
-                        drawLandmarks(canvasCtx, results.poseLandmarks,
-                            { color: '#ffffff', fillColor: '#3b82f6', lineWidth: 2, radius: 4 });
-                    }
+                    drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#3b82f6', lineWidth: 4 });
+                    drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#ffffff', fillColor: '#3b82f6', lineWidth: 2, radius: 4 });
                 }
-
                 updateStatus(true);
             } else {
-                handleLostTracking();
+                updateStatus(false);
             }
-
             canvasCtx.restore();
         }
 
-        function processTrackingLogic(landmarks) {
-            const minConf = parseFloat(document.getElementById('min-confidence').value);
-            let visibleCount = 0;
-
-            landmarks.forEach((lm, index) => {
-                if (lm.visibility > minConf) {
-                    visibleCount++;
-
-                    // Calcular velocidad si existe registro previo
-                    if (trackerState.lastPositions[index]) {
-                        const dx = lm.x - trackerState.lastPositions[index].x;
-                        const dy = lm.y - trackerState.lastPositions[index].y;
-                        trackerState.velocities[index] = { x: dx, y: dy };
-                    }
-
-                    trackerState.lastPositions[index] = { x: lm.x, y: lm.y };
-                } else if (document.getElementById('tracking-mode').value === 'predictive') {
-                    // LÓGICA DE PREDICCIÓN: Si un punto desaparece, lo movemos según su última velocidad
-                    if (trackerState.velocities[index] && trackerState.lastPositions[index]) {
-                        trackerState.lastPositions[index].x += trackerState.velocities[index].x;
-                        trackerState.lastPositions[index].y += trackerState.velocities[index].y;
-
-                        // Re-inyectar el punto predicho en el array para dibujo
-                        lm.x = trackerState.lastPositions[index].x;
-                        lm.y = trackerState.lastPositions[index].y;
-                        lm.isPredicted = true;
-                    }
-                }
-            });
-
-            // Si detectamos al menos un 20% del esqueleto, mantenemos el "enganche"
-            if (visibleCount > (landmarks.length * 0.2)) {
-                trackerState.isLost = false;
-                trackerState.framesLost = 0;
-            } else {
-                handleLostTracking();
-            }
-        }
-
-        function handleLostTracking() {
-            trackerState.framesLost++;
-
-            if (trackerState.framesLost > trackerState.maxFramesToPredict) {
-                if (!trackerState.isLost) {
-                    log("Controlador Perdido: Reiniciando búsqueda global", "warn");
-                }
-                trackerState.isLost = true;
-                trackerState.lastPositions = {}; // Limpiar memoria para no asumir posición vieja
-                trackerState.velocities = {};
-                updateStatus(false);
-            } else if (!trackerState.isLost) {
-                // Estamos en el limbo de predicción
-                statusText.innerText = "PREDICIENDO...";
-                statusDot.className = "w-2 h-2 rounded-full bg-yellow-500";
-            }
-        }
-
-        function updateStatus(active) {
-            if (active) {
-                statusDot.className = "w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e]";
-                statusText.innerText = "RASTREANDO";
-                if (trackerState.framesLost === 0 && trackerState.isLost) {
-                    log("Controlador detectado con éxito", "info");
-                    trackerState.isLost = false;
-                }
-            } else {
-                statusDot.className = "w-2 h-2 rounded-full bg-red-500 status-lost";
-                statusText.innerText = "BUSCANDO...";
-            }
-        }
-
-        // --- INICIALIZACIÓN DE CÁMARA Y MODELO ---
-        const pose = new Pose({
-            locateFile: (file) => {
-                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
-            }
-        });
-
-        pose.setOptions({
-            modelComplexity: 1, // 0: Rapidez, 1: Balance, 2: Precisión (pesado)
-            smoothLandmarks: true,
-            enableSegmentation: false,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
-
+        // (Código de inicialización Pose igual al anterior pero optimizado)
+        const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
+        pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
         pose.onResults(onResults);
 
         const camera = new Camera(videoElement, {
-            onFrame: async () => {
-                await pose.send({ image: videoElement });
-            },
-            width: 1280,
-            height: 720
+            onFrame: async () => { await pose.send({ image: videoElement }); },
+            width: 1280, height: 720
         });
 
         let lastTime = performance.now();
         function updateFPS() {
             const now = performance.now();
-            const delta = now - lastTime;
+            fpsCounter.innerText = Math.round(1000 / (now - lastTime));
             lastTime = now;
-            fpsCounter.innerText = Math.round(1000 / delta);
         }
 
-        // Ajustar canvas al tamaño de la ventana
+        function updateStatus(active) {
+            statusDot.className = `w-2 h-2 rounded-full ${active ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-red-500 status-lost'}`;
+            statusText.innerText = active ? "RASTREANDO" : "BUSCANDO...";
+        }
+
         function resize() {
             const vHeight = window.innerHeight * 0.9;
-            const vWidth = (1280 / 720) * vHeight;
-
-            canvasElement.width = vWidth;
+            canvasElement.width = (1280 / 720) * vHeight;
             canvasElement.height = vHeight;
         }
 
         window.addEventListener('resize', resize);
-        window.onload = () => {
-            resize();
-            log("Cargando motor de IA...");
-            camera.start().then(() => {
-                log("Cámara iniciada. Resolución: 720p");
-            }).catch(err => {
-                log("Error al acceder a cámara: " + err, "error");
-            });
-        };
-
+        window.onload = () => { resize(); camera.start(); };
     </script>
 
 </body>
