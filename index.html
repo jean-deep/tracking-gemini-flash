@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Body Tracker Pro - Intelligent Tracking</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            background-color: #050505;
+            color: white;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+        }
+
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            position: absolute;
+            border-radius: 12px;
+        }
+
+        #video-hidden {
+            display: none;
+        }
+
+        .glass {
+            background: rgba(15, 15, 20, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel-transition {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 10px;
+        }
+
+        @keyframes pulse-red {
+            0% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
+        }
+
+        .status-lost {
+            animation: pulse-red 1.5s infinite;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="canvas-container">
+        <video id="video-hidden"></video>
+        <canvas id="output-canvas"></canvas>
+    </div>
+
+    <!-- Menú de Esquina -->
+    <div class="fixed top-6 left-6 z-50">
+        <button id="menu-toggle" class="p-4 glass rounded-full hover:bg-white/10 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </button>
+    </div>
+
+    <!-- Sidebar Principal -->
+    <div id="sidebar"
+        class="fixed top-0 left-0 h-full w-80 glass z-40 transform -translate-x-full panel-transition p-6 pt-24 overflow-y-auto custom-scrollbar">
+        <h2 class="text-2xl font-bold mb-8 text-blue-400">Panel de Control</h2>
+
+        <!-- Configuración del Controlador -->
+        <div class="mb-6">
+            <button onclick="togglePanel('config-content')"
+                class="flex items-center justify-between w-full mb-2 font-semibold text-gray-300">
+                CONTROLADORES
+                <span>▼</span>
+            </button>
+            <div id="config-content" class="space-y-4 text-sm">
+                <div class="p-3 bg-white/5 rounded-lg border border-white/10">
+                    <p class="mb-2 text-xs text-gray-400">Confianza Mínima de Rastreo</p>
+                    <input type="range" id="min-confidence" class="w-full accent-blue-500" min="0" max="1" step="0.1"
+                        value="0.5">
+                </div>
+                <div class="p-3 bg-white/5 rounded-lg border border-white/10">
+                    <p class="mb-2 text-xs text-gray-400">Modo de Interpolación</p>
+                    <select id="tracking-mode" class="w-full bg-black/50 p-2 rounded border border-white/10">
+                        <option value="predictive">Predicción Inteligente (Kalman)</option>
+                        <option value="raw">Datos Crudos (Baja Latencia)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Rastreo de Esqueleto -->
+        <div class="mb-6">
+            <button onclick="togglePanel('skeleton-content')"
+                class="flex items-center justify-between w-full mb-2 font-semibold text-gray-300">
+                VISUALIZADOR 3D
+                <span>▼</span>
+            </button>
+            <div id="skeleton-content" class="space-y-2">
+                <div class="flex items-center gap-2 text-sm text-gray-400">
+                    <input type="checkbox" id="show-skeleton" checked>
+                    <label>Mostrar Esqueleto</label>
+                </div>
+                <div class="flex items-center gap-2 text-sm text-gray-400">
+                    <input type="checkbox" id="show-connectors" checked>
+                    <label>Dibujar Conectores</label>
+                </div>
+                <div class="flex items-center gap-2 text-sm text-gray-400">
+                    <input type="checkbox" id="show-points" checked>
+                    <label>Nodos de Articulación</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Consola de Estado -->
+        <div class="mb-6">
+            <button onclick="togglePanel('console-content')"
+                class="flex items-center justify-between w-full mb-2 font-semibold text-gray-300">
+                CONSOLA DE ESTADO
+                <span>▼</span>
+            </button>
+            <div id="console-content"
+                class="h-48 bg-black/40 rounded-lg p-3 text-[10px] font-mono overflow-y-auto custom-scrollbar border border-white/10 text-green-400">
+                <div id="log-output">> Sistema Iniciado...<br>> Esperando cámara...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay de Estado Rápido -->
+    <div class="fixed top-6 right-6 flex gap-4 pointer-events-none">
+        <div id="status-badge"
+            class="px-4 py-2 glass rounded-lg flex items-center gap-2 text-sm font-bold uppercase tracking-widest">
+            <div id="status-dot" class="w-2 h-2 rounded-full bg-red-500"></div>
+            <span id="status-text">Sin Señal</span>
+        </div>
+        <div class="px-4 py-2 glass rounded-lg text-sm font-mono">
+            FPS: <span id="fps-counter">0</span>
+        </div>
+    </div>
+
+    <script>
+        // --- LÓGICA DE INTERFAZ ---
+        const menuToggle = document.getElementById('menu-toggle');
+        const sidebar = document.getElementById('sidebar');
+        let isMenuOpen = false;
+
+        menuToggle.addEventListener('click', () => {
+            isMenuOpen = !isMenuOpen;
+            sidebar.style.transform = isMenuOpen ? 'translateX(0)' : 'translateX(-100%)';
+        });
+
+        function togglePanel(id) {
+            const panel = document.getElementById(id);
+            panel.classList.toggle('hidden');
+        }
+
+        function log(msg, type = 'info') {
+            const consoleOut = document.getElementById('log-output');
+            const color = type === 'warn' ? 'text-yellow-400' : (type === 'error' ? 'text-red-400' : 'text-green-400');
+            consoleOut.innerHTML += `<div class="${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            consoleOut.scrollTop = consoleOut.scrollHeight;
+        }
+
+        // --- LÓGICA DE RASTREO INTELIGENTE ---
+        const videoElement = document.getElementById('video-hidden');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const fpsCounter = document.getElementById('fps-counter');
+
+        // Estructura para Memoria de Puntos (Predicción de movimiento rápido)
+        // Guardamos posición anterior y velocidad para interpolar oclusiones
+        let trackerState = {
+            history: [], // Historial de frames para promedios
+            lastPositions: {}, // Última posición conocida de cada landmark
+            velocities: {}, // Velocidad calculada (píxeles/frame)
+            isLost: true,
+            framesLost: 0,
+            maxFramesToPredict: 15 // Cuántos frames predecir antes de rendirse
+        };
+
+        function onResults(results) {
+            // Cálculo de FPS
+            updateFPS();
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // Dibujar el video de fondo con opacidad reducida para mejor visibilidad del esqueleto
+            canvasCtx.globalAlpha = 0.4;
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.globalAlpha = 1.0;
+
+            if (results.poseLandmarks) {
+                processTrackingLogic(results.poseLandmarks);
+
+                // Visualización
+                if (document.getElementById('show-skeleton').checked) {
+                    if (document.getElementById('show-connectors').checked) {
+                        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
+                            { color: '#3b82f6', lineWidth: 4 });
+                    }
+                    if (document.getElementById('show-points').checked) {
+                        drawLandmarks(canvasCtx, results.poseLandmarks,
+                            { color: '#ffffff', fillColor: '#3b82f6', lineWidth: 2, radius: 4 });
+                    }
+                }
+
+                updateStatus(true);
+            } else {
+                handleLostTracking();
+            }
+
+            canvasCtx.restore();
+        }
+
+        function processTrackingLogic(landmarks) {
+            const minConf = parseFloat(document.getElementById('min-confidence').value);
+            let visibleCount = 0;
+
+            landmarks.forEach((lm, index) => {
+                if (lm.visibility > minConf) {
+                    visibleCount++;
+
+                    // Calcular velocidad si existe registro previo
+                    if (trackerState.lastPositions[index]) {
+                        const dx = lm.x - trackerState.lastPositions[index].x;
+                        const dy = lm.y - trackerState.lastPositions[index].y;
+                        trackerState.velocities[index] = { x: dx, y: dy };
+                    }
+
+                    trackerState.lastPositions[index] = { x: lm.x, y: lm.y };
+                } else if (document.getElementById('tracking-mode').value === 'predictive') {
+                    // LÓGICA DE PREDICCIÓN: Si un punto desaparece, lo movemos según su última velocidad
+                    if (trackerState.velocities[index] && trackerState.lastPositions[index]) {
+                        trackerState.lastPositions[index].x += trackerState.velocities[index].x;
+                        trackerState.lastPositions[index].y += trackerState.velocities[index].y;
+
+                        // Re-inyectar el punto predicho en el array para dibujo
+                        lm.x = trackerState.lastPositions[index].x;
+                        lm.y = trackerState.lastPositions[index].y;
+                        lm.isPredicted = true;
+                    }
+                }
+            });
+
+            // Si detectamos al menos un 20% del esqueleto, mantenemos el "enganche"
+            if (visibleCount > (landmarks.length * 0.2)) {
+                trackerState.isLost = false;
+                trackerState.framesLost = 0;
+            } else {
+                handleLostTracking();
+            }
+        }
+
+        function handleLostTracking() {
+            trackerState.framesLost++;
+
+            if (trackerState.framesLost > trackerState.maxFramesToPredict) {
+                if (!trackerState.isLost) {
+                    log("Controlador Perdido: Reiniciando búsqueda global", "warn");
+                }
+                trackerState.isLost = true;
+                trackerState.lastPositions = {}; // Limpiar memoria para no asumir posición vieja
+                trackerState.velocities = {};
+                updateStatus(false);
+            } else if (!trackerState.isLost) {
+                // Estamos en el limbo de predicción
+                statusText.innerText = "PREDICIENDO...";
+                statusDot.className = "w-2 h-2 rounded-full bg-yellow-500";
+            }
+        }
+
+        function updateStatus(active) {
+            if (active) {
+                statusDot.className = "w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e]";
+                statusText.innerText = "RASTREANDO";
+                if (trackerState.framesLost === 0 && trackerState.isLost) {
+                    log("Controlador detectado con éxito", "info");
+                    trackerState.isLost = false;
+                }
+            } else {
+                statusDot.className = "w-2 h-2 rounded-full bg-red-500 status-lost";
+                statusText.innerText = "BUSCANDO...";
+            }
+        }
+
+        // --- INICIALIZACIÓN DE CÁMARA Y MODELO ---
+        const pose = new Pose({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+            }
+        });
+
+        pose.setOptions({
+            modelComplexity: 1, // 0: Rapidez, 1: Balance, 2: Precisión (pesado)
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        pose.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await pose.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
+
+        let lastTime = performance.now();
+        function updateFPS() {
+            const now = performance.now();
+            const delta = now - lastTime;
+            lastTime = now;
+            fpsCounter.innerText = Math.round(1000 / delta);
+        }
+
+        // Ajustar canvas al tamaño de la ventana
+        function resize() {
+            const vHeight = window.innerHeight * 0.9;
+            const vWidth = (1280 / 720) * vHeight;
+
+            canvasElement.width = vWidth;
+            canvasElement.height = vHeight;
+        }
+
+        window.addEventListener('resize', resize);
+        window.onload = () => {
+            resize();
+            log("Cargando motor de IA...");
+            camera.start().then(() => {
+                log("Cámara iniciada. Resolución: 720p");
+            }).catch(err => {
+                log("Error al acceder a cámara: " + err, "error");
+            });
+        };
+
+    </script>
+
+</body>
+
+</html>
